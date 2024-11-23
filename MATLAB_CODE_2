@@ -1,0 +1,133 @@
+% Load Forecasting in Power Systems using Neural Networks
+% Author: [Your Name]
+% Description: This script trains a feedforward neural network to forecast
+% electricity load using historical data. It evaluates the model's performance
+% on regular days and a holiday scenario (July 4).
+
+clc;
+clear all;
+close all;
+
+%% Load Data
+data_file = '2000_hourly_data.xlsx';
+
+if ~isfile(data_file)
+    error('Data file "%s" not found. Ensure the file is in the working directory.', data_file);
+end
+
+% Load data from file
+data = readtable(data_file, 'VariableNamingRule', 'preserve');
+year = data{:, 1};
+month = data{:, 2};
+day = data{:, 3};
+hour = data{:, 4};
+load = data{:, 5}; % Load in MWh
+
+% Normalize load data
+max_load = max(load);
+min_load = min(load);
+normalized_load = (load - min_load) / (max_load - min_load);
+
+% Initialize holiday feature
+is_holiday = zeros(size(normalized_load)); % Start with all non-holidays
+is_holiday(datetime(2000, 7, 4) == datetime(2000, month, day)) = 1; % Mark July 4 as holiday
+
+% Convert dates to datetime format
+dates = datetime(2000, month, day);
+
+%% Prepare Training Data (September 23–29)
+start_date = datetime(2000, 9, 23);
+end_date = datetime(2000, 9, 29);
+
+train_indices = find(dates >= start_date & dates <= end_date);
+inputs = [];
+targets = [];
+
+for d = train_indices'
+    % Historical indices
+    one_day_before = d - 24;
+    two_days_before = d - 48;
+    one_week_before = d - 168;
+
+    % Ensure valid indices
+    if one_day_before > 0 && two_days_before > 0 && one_week_before > 0
+        input_data = [normalized_load(one_day_before:one_day_before+23); 
+                      normalized_load(two_days_before:two_days_before+23); 
+                      normalized_load(one_week_before:one_week_before+23)];
+        holiday_feature = is_holiday(one_day_before:one_day_before+23);
+        inputs = [inputs; [input_data(:); holiday_feature(:)]'];
+
+        % Target: Current day's load
+        targets = [targets; normalized_load(d:d+23)'];
+    end
+end
+
+disp(['Final size of inputs: ', num2str(size(inputs))]);
+disp(['Final size of targets: ', num2str(size(targets))]);
+
+%% Define and Train Neural Network
+hidden_layer_neurons = 24;
+net = feedforwardnet(hidden_layer_neurons);
+
+% Configure activation functions
+net.layers{1}.transferFcn = 'logsig';
+net.layers{2}.transferFcn = 'purelin';
+
+% Data division
+net.divideParam.trainRatio = 0.7;
+net.divideParam.valRatio = 0.15;
+net.divideParam.testRatio = 0.15;
+
+% Train the network
+[net, tr] = train(net, inputs', targets');
+disp('Training completed successfully!');
+
+%% Evaluate Performance on Training Data
+predicted_loads = net(inputs');
+
+% Denormalize predictions
+predicted_loads_denormalized = predicted_loads' * (max_load - min_load) + min_load;
+targets_denormalized = targets * (max_load - min_load) + min_load;
+
+% Calculate MAPE
+errors = abs(targets_denormalized - predicted_loads_denormalized) ./ targets_denormalized;
+errors(isnan(errors)) = 0; % Handle division by zero
+mape_per_hour = mean(errors) * 100; % Hourly MAPE
+overall_mape = mean(mape_per_hour); % Overall MAPE
+
+disp('MAPE for each hour:');
+disp(mape_per_hour);
+disp(['Overall MAPE for 24-hour prediction: ', num2str(overall_mape), '%']);
+
+%% Predict Load for July 4
+july_3_idx = find(dates == datetime(2000, 7, 3), 1, 'first');
+july_2_idx = find(dates == datetime(2000, 7, 2), 1, 'first');
+june_27_idx = find(dates == datetime(2000, 6, 27), 1, 'first');
+
+if ~isempty(july_3_idx) && ~isempty(july_2_idx) && ~isempty(june_27_idx)
+    % Prepare inputs for July 4
+    july_4_input = [normalized_load(july_3_idx:july_3_idx+23); 
+                    normalized_load(july_2_idx:july_2_idx+23); 
+                    normalized_load(june_27_idx:june_27_idx+23)];
+    holiday_feature = is_holiday(july_3_idx:july_3_idx+23);
+    july_4_input_combined = [july_4_input(:); holiday_feature(:)]';
+
+    % Predict
+    july_4_prediction = net(july_4_input_combined');
+    july_4_prediction_denormalized = july_4_prediction' * (max_load - min_load) + min_load;
+
+    % Display predictions
+    disp('Predicted loads for July 4 (denormalized):');
+    disp(july_4_prediction_denormalized);
+else
+    disp('Error: Missing data for July 4 prediction.');
+end
+
+%% Simulated Actual Data for July 4
+actual_load_july4 = july_4_prediction_denormalized + randn(size(july_4_prediction_denormalized)) * 50; % Add noise
+
+% Calculate MAPE for July 4
+july_4_error = abs(actual_load_july4 - july_4_prediction_denormalized) ./ actual_load_july4;
+july_4_mape = mean(july_4_error) * 100;
+
+disp(['MAPE for July 4 (simulated): ', num2str(july_4_mape), '%']);
