@@ -1,5 +1,5 @@
 % Load Forecasting in Power Systems using Neural Networks
-% Author: [Your Name]
+% Author: [AHMED ALMOOLA]
 % Description: This script trains a feedforward neural network to forecast
 % electricity load using historical data. It evaluates the model's performance
 % on regular days and a holiday scenario (July 4).
