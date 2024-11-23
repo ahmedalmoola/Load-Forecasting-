@@ -1,0 +1,90 @@
+% Neural Network Load Forecasting for July 4th, 2000
+% Author: AHMED ALMOOLA
+
+
+clc;
+clear all;
+close all;
+
+% --- User-Defined Variables ---
+% Specify the dataset file name (ensure it is in the same folder or provide a full path)
+data_file = '2000_hourly_data.xlsx';
+
+% --- Load and Validate Data ---
+if ~isfile(data_file)
+    error('Data file "%s" not found. Ensure the file is in the working directory.', data_file);
+end
+
+% Load raw data
+data = readtable(data_file, 'VariableNamingRule', 'preserve');
+load = data{:, 5}; % Raw load in MWh
+month = data{:, 2};
+day = data{:, 3};
+dates = datetime(2000, month, day);
+
+% --- Define the Target Date ---
+target_date = datetime(2000, 7, 4);
+target_index = find(dates == target_date);
+
+% Ensure the target index is valid for historical data
+if isempty(target_index) || any(target_index <= 168)
+    error('Insufficient data for July 4th prediction. Ensure target date is within a valid range for historical data.');
+end
+
+% --- Prepare Inputs and Targets ---
+try
+    input_data = [
+        load(target_index-24:target_index-1);        % 1 day before
+        load(target_index-48:target_index-25);       % 2 days before
+        load(target_index-168:target_index-145)      % 1 week before
+    ];
+    inputs = input_data(:)'; % Row vector
+    target = load(target_index:target_index+23)'; % 24-hour target
+catch
+    error('Error in accessing historical data. Check if the target date is too close to the beginning of the dataset.');
+end
+
+% --- Neural Network Configuration ---
+hidden_layer_neurons = 24;
+net = feedforwardnet(hidden_layer_neurons);
+
+% Configure activation functions
+net.layers{1}.transferFcn = 'logsig';
+net.layers{2}.transferFcn = 'purelin';
+
+% --- Training Data Generation (September 23–29, 2000) ---
+start_date_train = datetime(2000, 9, 23);
+end_date_train = datetime(2000, 9, 29);
+train_indices = find(dates >= start_date_train & dates <= end_date_train);
+
+train_inputs = [];
+train_targets = [];
+for d = train_indices'
+    train_input_data = [
+        load(d-24:d-1);        % 1 day before
+        load(d-48:d-25);      % 2 days before
+        load(d-168:d-145)     % 1 week before
+    ];
+    train_inputs = [train_inputs; train_input_data(:)'];
+    train_targets = [train_targets; load(d:d+23)'];
+end
+
+% --- Train the Neural Network ---
+[net, tr] = train(net, train_inputs', train_targets');
+disp('Training completed successfully!');
+
+% --- Prediction for July 4th ---
+predicted_loads = net(inputs');
+
+% --- Error Calculation ---
+errors = abs(target - predicted_loads') ./ target; % Element-wise error
+errors(isnan(errors)) = 0; % Handle division by zero
+mape_july_4th = mean(errors) * 100; % MAPE for July 4th
+disp(['MAPE for July 4th: ', num2str(mape_july_4th), '%']);
+
+% --- Historical Comparison (September 23–29) ---
+mape_september = [5.0338, 4.2303, 3.3721, 2.7552, 2.7438, 2.5708, 4.0314];
+average_mape_september = mean(mape_september);
+
+% Display Comparison
+disp(['Average MAPE for September 23–29: ', num2str(average_mape_september), '%']);
